@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>数独 対戦（VS CPU）</title>
+<style>
+  :root{ --bg:#0b1020; --fg:#eaf0ff; --line:#27366f; --accent:#7bdcff; --warn:#ffd66b; --bad:#ff6b6b; --good:#91ffad; --blue:#7bdcff; }
+  html,body{ margin:0; height:100%; background:radial-gradient(1200px 800px at 70% 10%,#101a3a 0%,#0b1020 40%,#060913 100%); color:var(--fg); font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; }
+  .wrap{ display:grid; grid-template-rows:auto 1fr; height:100%; }
+  header{ padding:10px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  header h1{ margin:0; font-size:16px; letter-spacing:.06em; opacity:.9 }
+  .hud{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pill{ padding:6px 10px; border-radius:999px; background:#101938; border:1px solid var(--line); font-variant-numeric:tabular-nums; }
+  .btn{ background:#142045; border:1px solid #31488f; color:var(--fg); padding:8px 12px; border-radius:10px; cursor:pointer; user-select:none; font-weight:700; }
+  .btn:active{ transform:translateY(1px) }
+  .sel{ display:flex; gap:6px; align-items:center; background:#0f1938; border:1px solid var(--line); padding:6px 8px; border-radius:10px; }
+  .sel select{ background:transparent; border:none; color:var(--fg); font-weight:700; }
+  main{ padding:12px 16px 24px; }
+
+  /* 横並びアリーナ（自動折返し） */
+  .arena{ display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:18px; max-width:1400px; margin:0 auto; align-items:start; }
+  .col{ position:relative; display:flex; flex-direction:column; gap:12px; min-width:0; }
+  .side{ display:flex; flex-direction:column; gap:10px; }
+  .who{ font-weight:900; letter-spacing:.04em; opacity:.95; display:flex; align-items:center; gap:10px; }
+  .name{ font-size:18px; }
+  .badge{ font-weight:900; padding:4px 10px; border-radius:12px; border:1px solid var(--line); background:rgba(11,16,32,.9); display:none; }
+  .win{ color:var(--blue); }
+  .lose{ color:#ff6b6b; }
+  .panels{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+
+  .board{ width:100%; max-width:640px; aspect-ratio:1/1; background:#0e1836; border:2px solid var(--line); border-radius:16px; padding:10px; position:relative; box-shadow:0 8px 24px rgba(0,0,0,.35); margin-inline:auto; overflow:hidden; }
+  canvas{ width:100%; height:100%; display:block; border-radius:12px; position:relative; z-index:2; }
+
+  .bar{ height:16px; border-radius:999px; background:#0f1938; border:1px solid var(--line); position:relative; overflow:hidden; min-width:200px; }
+  .bar > i{ position:absolute; inset:0; width:100%; background:linear-gradient(90deg,#2bd279,#91ffad); transform-origin:left center; transform:scaleX(1); }
+  .stat{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pad{ display:flex; flex-wrap:wrap; gap:6px; }
+  .nbtn{ width:40px; height:40px; border-radius:12px; background:#0f1938; border:1px solid var(--line); color:var(--fg); font-weight:800; cursor:pointer; }
+  .tips{ position:fixed; right:10px; bottom:10px; font-size:12px; opacity:.7; background:rgba(16,25,56,.6); padding:6px 10px; border-radius:10px; border:1px solid var(--line); }
+  .stun{ color:#ffef9a; }
+
+  /* フローティングテキスト */
+  .fx{ position:fixed; pointer-events:none; font-weight:900; text-shadow:0 2px 8px rgba(0,0,0,.45); opacity:0; transform:translate(-50%,0) scale(1); transition:transform .6s ease, opacity .6s ease; z-index:5; }
+  .fx.show{ opacity:1; transform:translate(-50%,-24px) scale(1.05); }
+  .fx.red{ color:#ff6b6b; }
+
+  /* ゲームセット */
+  .overlay{ position:fixed; inset:0; display:grid; place-items:center; pointer-events:none; z-index:10000; }
+  .gameset{ font-size:clamp(36px, 6vw, 72px); font-weight:900; letter-spacing:.06em; padding:18px 28px; border-radius:18px; background:rgba(11,16,32,.88); border:2px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>数独 対戦（VS CPU）</h1>
+    <div class="hud">
+      <div class="pill">盤の難易度:
+        <span class="sel">
+          <select id="difficulty">
+            <option value="easy">Easy</option>
+            <option value="medium" selected>Medium</option>
+            <option value="hard">Hard</option>
+            <option value="expert">Expert</option>
+          </select>
+        </span>
+      </div>
+      <div class="pill">CPU強さ:
+        <span class="sel">
+          <select id="cpuDiff">
+            <option value="vEasy" selected>Very Easy (10s/手・Miss 50%)</option>
+            <option value="easy">Easy (7.5s/手・Miss 30%)</option>
+            <option value="medium">Medium (4.5s/手・Miss 15%)</option>
+            <option value="hard">Hard (2.0s/手・Miss 7%)</option>
+            <option value="expert">Expert (0.35s/手・Miss 0.5%)</option>
+          </select>
+        </span>
+      </div>
+      <div class="pill">開始HP: <span id="startHp">100</span></div>
+      <button id="matchBtn" class="btn">試合開始</button>
+      <button id="pauseBtn" class="btn">一時停止</button>
+      <button id="newBtn" class="btn">新しい対戦</button>
+      <label class="btn" style="display:flex;gap:6px;align-items:center;">
+        <input type="checkbox" id="autoCheck" checked> 自動エラーチェック
+      </label>
+    </div>
+  </header>
+  <main>
+    <div class="arena" id="arena">
+      <!-- 左：YOU -->
+      <section class="col" id="colYou">
+        <div class="side">
+          <div class="who">
+            <span class="name">YOU</span>
+            <span id="badgeYou" class="badge"></span>
+          </div>
+          <div class="panels">
+            <div class="bar" id="barYou"><i id="hpYou"></i></div>
+            <div class="pill">時間: <span id="timeYou">00:00</span></div>
+            <div class="pill">スタン: <span id="missYou">0.0s</span></div>
+            <div class="pill">与ダメ合計: <span id="dmgYou">0</span></div>
+          </div>
+          <div class="pad" id="numPad"></div>
+        </div>
+        <div class="board">
+          <canvas id="boardPlayer"></canvas>
+        </div>
+      </section>
+
+      <!-- 右：CPU -->
+      <section class="col" id="colCpu">
+        <div class="side">
+          <div class="who">
+            <span class="name">CPU</span>
+            <span id="badgeCpu" class="badge"></span>
+          </div>
+          <div class="panels">
+            <div class="bar" id="barCpu"><i id="hpCpu"></i></div>
+            <div class="pill">時間: <span id="timeCpu">00:00</span></div>
+            <div class="pill">進捗: <span id="progCpu">0/81</span></div>
+            <div class="pill">与ダメ合計: <span id="dmgCpu">0</span></div>
+            <div class="pill">CPU速度: <span id="cpuSpd">—</span></div>
+          </div>
+        </div>
+        <div class="board">
+          <canvas id="boardCpu"></canvas>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="overlay" aria-hidden="true"><div class="gameset" id="gameSet" style="display:none;">GAME SET</div></div>
+<div class="tips">勝利条件：①自分が先に完成、②相手HPを0にする。ダメージ＝確定した数字そのもの（例：8を確定→8ダメージ）。ミス＝盤面は変化せず、自傷（数値分）＋1秒スタン。CPUも難易度依存の確率でミスします。</div>
+<script>
+(() => {
+  // ====== Utilities ======
+  const pad2 = (n)=> String(n).padStart(2,'0');
+  const now = ()=> performance.now();
+  function idx(r,c){ return r*9+c; }
+  const row = (i)=> Math.floor(i/9);
+  const col = (i)=> i%9;
+
+  // RNG
+  let seed = 1234567; function srand(s){ seed=(s>>>0)||1; } function rand(){ seed = (seed*1664525 + 1013904223)>>>0; return seed/0xffffffff; }
+  function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(rand()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+
+  // Sudoku core
+  function allowedSet(state,i){ if(state[i]!==0) return new Set(); const used=new Set(); const r=row(i), c=col(i); for(let k=0;k<9;k++){ used.add(state[idx(r,k)]); used.add(state[idx(k,c)]); } const br=r-r%3, bc=c-c%3; for(let rr=br; rr<br+3; rr++) for(let cc=bc; cc<bc+3; cc++) used.add(state[idx(rr,cc)]); const s=new Set(); for(let n=1;n<=9;n++) if(!used.has(n)) s.add(n); return s; }
+  function findEmpty(state){ for(let i=0;i<81;i++) if(state[i]===0) return i; return -1; }
+  function solve(state, limit=2){ const s=state.slice(); let solutions=0; const g=new Array(81); function dfs(){ if(solutions>=limit) return; const i=findEmpty(s); if(i<0){ solutions++; if(solutions===1) for(let k=0;k<81;k++) g[k]=s[k]; return; } const cand=[...allowedSet(s,i)]; if(cand.length===0) return; shuffle(cand); for(const v of cand){ s[i]=v; dfs(); if(solutions>=limit) return; } s[i]=0; } dfs(); return { solved: solutions>0, solutions, grid:g }; }
+  function generate(diff='medium'){ const s=new Array(81).fill(0); srand((Date.now()&0xfffffff) ^ Math.floor(Math.random()*1e9)); function fillBox(r0,c0){ const nums=shuffle([1,2,3,4,5,6,7,8,9]); let t=0; for(let r=0;r<3;r++) for(let c=0;c<3;c++) s[idx(r0+r,c0+c)] = nums[t++]; } fillBox(0,0); fillBox(3,3); fillBox(6,6); (function fill(){ const res=solve(s,1); if(res.solved){ for(let i=0;i<81;i++) s[i]=res.grid[i]; } else { for(let i=0;i<81;i++) s[i]=0; fill(); }})(); let removals; switch(diff){ case 'easy': removals=40; break; case 'medium': removals=50; break; case 'hard': removals=56; break; default: removals=60; } const cells=shuffle([...Array(81).keys()]); const puzzle=s.slice(); for(const i of cells){ if(removals<=0) break; const bk=puzzle[i]; puzzle[i]=0; const {solutions} = solve(puzzle,2); if(solutions!==1){ puzzle[i]=bk; } else { removals--; } } return { puzzle, solution:s };
+  }
+
+  // ====== Boards (rendering) ======
+  function makeBoard(canvas){
+    const ctx = canvas.getContext('2d');
+    let W=0,H=0,DPR=Math.min(2,window.devicePixelRatio||1);
+    const state = { grid:new Array(81).fill(0), givens:new Array(81).fill(0), fixed:new Array(81).fill(false), notes:Array.from({length:81},()=>new Set()), selected:-1, hover:-1, autoCheck:true };
+    function resize(){ W=canvas.clientWidth; H=canvas.clientHeight; canvas.width=Math.floor(W*DPR); canvas.height=Math.floor(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0); draw(); }
+    window.addEventListener('resize', resize, {passive:true});
+    function pick(e){ const r=canvas.getBoundingClientRect(); const x=(e.clientX-r.left); const y=(e.clientY-r.top); const s=Math.min(W,H); const offx=(W-s)/2, offy=(H-s)/2; if(x<offx||y<offy||x>offx+s||y>offy+s) return -1; const cs=s/9; const c=Math.floor((x-offx)/cs); const rr=Math.floor((y-offy)/cs); return idx(rr,c); }
+    function cellClientCenter(i){ const r=canvas.getBoundingClientRect(); const s=Math.min(W,H); const offx=(W-s)/2, offy=(H-s)/2; const cs=s/9; const x=r.left + offx + (col(i)+0.5)*cs; const y=r.top  + offy + (row(i)+0.5)*cs; return {x,y}; }
+    canvas.addEventListener('mousemove', e=>{ state.hover=pick(e); draw(); });
+    canvas.addEventListener('mouseleave', ()=>{ state.hover=-1; draw(); });
+    canvas.addEventListener('click', e=>{ const i=pick(e); if(i>=0){ state.selected=i; draw(); }});
+    function setPuzzle(puz){ state.givens=puz.puzzle.slice(); state.grid=state.givens.slice(); state.fixed=state.grid.map(v=> v!==0); state.notes=Array.from({length:81},()=>new Set()); state.selected=-1; draw(); }
+    function setValue(i,v){ if(state.fixed[i]) return false; state.grid[i]=v; state.notes[i].clear(); draw(); return true; }
+    function clearCell(i){ if(state.fixed[i]) return false; state.grid[i]=0; state.notes[i].clear(); draw(); return true; }
+    function contradictionAt(i){ const v=state.grid[i]; if(v===0) return false; const r=row(i), c=col(i); for(let x=0;x<9;x++){ const j=idx(r,x); if(j!==i && state.grid[j]===v) return true; } for(let y=0;y<9;y++){ const j=idx(y,c); if(j!==i && state.grid[j]===v) return true; } const br=r-r%3, bc=c-c%3; for(let rr=br; rr<br+3; rr++) for(let cc=bc; cc<bc+3; cc++){ const j=idx(rr,cc); if(j!==i && state.grid[j]===v) return true; } return false; }
+    function solved(){ for(let i=0;i<81;i++) if(state.grid[i]===0 || contradictionAt(i)) return false; return true; }
+    function draw(){ const s=Math.min(W,H); const offx=(W-s)/2, offy=(H-s)/2; ctx.clearRect(0,0,W,H); ctx.save(); ctx.translate(offx,offy); ctx.fillStyle='#0c142e'; ctx.fillRect(0,0,s,s); const cs=s/9; if(state.selected>=0){ const r0=row(state.selected), c0=col(state.selected); ctx.fillStyle='rgba(123,220,255,.09)'; ctx.fillRect(0,r0*cs,s,cs); ctx.fillRect(c0*cs,0,cs,s); const br=r0-r0%3, bc=c0-c0%3; ctx.fillRect(bc*cs, br*cs, cs*3, cs*3); }
+      ctx.strokeStyle='rgba(123,220,255,.18)'; ctx.lineWidth=1; ctx.beginPath(); for(let i=1;i<9;i++){ ctx.moveTo(0,i*cs); ctx.lineTo(s,i*cs); ctx.moveTo(i*cs,0); ctx.lineTo(i*cs,s);} ctx.stroke(); ctx.strokeStyle='rgba(123,220,255,.5)'; ctx.lineWidth=2.5; ctx.beginPath(); for(let i=0;i<=9;i+=3){ ctx.moveTo(0,i*cs); ctx.lineTo(s,i*cs); ctx.moveTo(i*cs,0); ctx.lineTo(i*cs,s);} ctx.stroke(); ctx.textAlign='center'; ctx.textBaseline='middle';
+      for(let i=0;i<81;i++){ const r0=row(i), c0=col(i); const x=c0*cs+cs/2, y=r0*cs+cs/2; const v=state.grid[i]; const isGiven=state.fixed[i]; if(i===state.hover){ ctx.fillStyle='rgba(145,255,173,.08)'; ctx.fillRect(c0*cs, r0*cs, cs, cs); } if(v!==0){ const bad = state.autoCheck && contradictionAt(i); ctx.fillStyle= bad? '#ff6b6b' : (isGiven? '#7bdcff' : '#eaf0ff'); ctx.font = `700 ${Math.floor(cs*0.52)}px system-ui,-apple-system,Segoe UI,Roboto`; ctx.fillText(String(v), x, y+1); }
+      }
+      ctx.restore(); }
+    resize();
+    return { state, resize, setPuzzle, setValue, clearCell, contradictionAt, solved, ctx, cellClientCenter };
+  }
+
+  // ====== App state ======
+  const elDiff = document.getElementById('difficulty');
+  const elCpuDiff = document.getElementById('cpuDiff');
+  const elMatch = document.getElementById('matchBtn');
+  const elPause = document.getElementById('pauseBtn');
+  const elNew   = document.getElementById('newBtn');
+  const elAuto  = document.getElementById('autoCheck');
+
+  const hpYouI  = document.getElementById('hpYou');
+  const hpCpuI  = document.getElementById('hpCpu');
+  const barYou  = document.getElementById('barYou');
+  const barCpu  = document.getElementById('barCpu');
+
+  const tYou    = document.getElementById('timeYou');
+  const tCpu    = document.getElementById('timeCpu');
+  const missYou = document.getElementById('missYou');
+  const dmgYou  = document.getElementById('dmgYou');
+  const dmgCpu  = document.getElementById('dmgCpu');
+  const progCpu = document.getElementById('progCpu');
+  const cpuSpd  = document.getElementById('cpuSpd');
+  const startHpSpan = document.getElementById('startHp');
+  const gameSetEl = document.getElementById('gameSet');
+  const badgeYou = document.getElementById('badgeYou');
+  const badgeCpu = document.getElementById('badgeCpu');
+
+  const pad = document.getElementById('numPad');
+  for(let n=1;n<=9;n++){ const b=document.createElement('button'); b.className='nbtn'; b.textContent=String(n); b.addEventListener('click',()=>handleNumber(n)); pad.appendChild(b); }
+  const b0=document.createElement('button'); b0.className='nbtn'; b0.textContent='⌫'; b0.title='消去'; b0.addEventListener('click',()=>handleNumber(0)); pad.appendChild(b0);
+
+  const boardYou = makeBoard(document.getElementById('boardPlayer'));
+  const boardCpu = makeBoard(document.getElementById('boardCpu'));
+  boardYou.state.autoCheck = elAuto.checked;
+  boardCpu.state.autoCheck = false;
+
+  let puzzleYou, solutionYou, puzzleCpu, solutionCpu;
+  let hpStart=100, hpYou=100, hpCpu=100;
+  let paused=false, running=false, finished=false;
+  let startTimeYou=0, startTimeCpu=0, timerId=0, cpuTimer=0;
+  let dealtYou=0, dealtCpu=0;
+  let stunUntil = 0; // player stun (ms)
+  let cpuStunUntil = 0; // cpu stun (ms)
+
+  function setHpBars(){ hpYouI.style.transform=`scaleX(${Math.max(0,hpYou)/hpStart})`; hpCpuI.style.transform=`scaleX(${Math.max(0,hpCpu)/hpStart})`; }
+  function setCpuSpeedLabel(spd){ cpuSpd.textContent = spd.toFixed(2)+' s/手'; }
+
+  function newMatch(){ const diff=elDiff.value; const gen1=generate(diff); const gen2=generate(diff); puzzleYou=gen1.puzzle; solutionYou=gen1.solution; puzzleCpu=gen2.puzzle; solutionCpu=gen2.solution; boardYou.setPuzzle({puzzle:puzzleYou}); boardCpu.setPuzzle({puzzle:puzzleCpu}); hpStart=100; hpYou=hpStart; hpCpu=hpStart; startHpSpan.textContent=hpStart; setHpBars(); dealtYou=0; dealtCpu=0; dmgYou.textContent='0'; dmgCpu.textContent='0'; missYou.textContent='0.0s'; tYou.textContent='00:00'; tCpu.textContent='00:00'; progCpu.textContent=`${countFilled(boardCpu.state.grid)}/81`; finished=false; paused=false; running=false; clearInterval(timerId); clearInterval(cpuTimer); setCpuSpeedLabel(cpuMoveInterval()); badgeYou.style.display='none'; badgeCpu.style.display='none'; gameSetEl.style.display='none'; }
+
+  function countFilled(g){ let n=0; for(let i=0;i<81;i++) if(g[i]!==0) n++; return n; }
+
+  function cpuMoveInterval(){ switch(elCpuDiff.value){ case 'vEasy': return 10.0; case 'easy': return 7.5; case 'medium': return 4.5; case 'hard': return 2.0; default: return 0.35; } }
+  function cpuMissProb(){ switch(elCpuDiff.value){ case 'vEasy': return 0.50; case 'easy': return 0.30; case 'medium': return 0.15; case 'hard': return 0.07; default: return 0.005; } }
+
+  function startMatch(){ if(running) return; running=true; paused=false; finished=false; startTimeYou=now(); startTimeCpu=now(); tickTimers(); cpuTimer = setInterval(cpuStep, cpuMoveInterval()*1000); }
+  function pauseToggle(){ if(!running || finished) return; paused=!paused; if(paused){ clearInterval(cpuTimer); } else { cpuTimer=setInterval(cpuStep, cpuMoveInterval()*1000); } }
+
+  function tickTimers(){ clearInterval(timerId); timerId=setInterval(()=>{ if(!running||paused||finished) return; const tY=Math.floor((now()-startTimeYou)/1000); const tC=Math.floor((now()-startTimeCpu)/1000); tYou.textContent = `${pad2(Math.floor(tY/60))}:${pad2(tY%60)}`; tCpu.textContent = `${pad2(Math.floor(tC/60))}:${pad2(tC%60)}`; const remain = Math.max(0, stunUntil - now()); missYou.textContent = (remain/1000).toFixed(1)+'s'; }, 100); }
+
+  function endMatch(result){ finished=true; running=false; clearInterval(cpuTimer); clearInterval(timerId); gameSetEl.style.display='block'; setTimeout(()=>{ gameSetEl.style.display='none'; const youWin = /YOU WIN/.test(result); badgeYou.textContent = youWin? 'WIN' : 'LOSE'; badgeCpu.textContent = youWin? 'LOSE' : 'WIN'; badgeYou.className = 'badge ' + (youWin? 'win':'lose'); badgeCpu.className = 'badge ' + (youWin? 'lose':'win'); badgeYou.style.display='inline-flex'; badgeCpu.style.display='inline-flex'; }, 3000); }
+
+  // フローティングテキスト
+  function floatAt(x, y, text, cls='red'){ const fx=document.createElement('div'); fx.className='fx '+cls; fx.textContent=text; fx.style.left=x+'px'; fx.style.top=y+'px'; document.body.appendChild(fx); requestAnimationFrame(()=> fx.classList.add('show')); setTimeout(()=>{ fx.style.opacity='0'; fx.style.transform='translate(-50%,-40px) scale(0.95)'; }, 500); setTimeout(()=> fx.remove(), 1100); }
+  function floatNearBar(barEl, text){ const r=barEl.getBoundingClientRect(); const x=r.right - 12; const y=r.top - 6; floatAt(x, y, text, 'red'); }
+  function floatOnBoard(board, i, text){ const c = board.cellClientCenter(i); floatAt(c.x, c.y, text, 'red'); }
+
+  // 入力
+  function handleNumber(n){ if(!running || paused || finished) return; if(now() < stunUntil) return; const i=boardYou.state.selected; if(i<0) return; if(boardYou.state.fixed[i]) return; if(n===0){ boardYou.clearCell(i); return; }
+    if(solutionYou[i]===n){
+      boardYou.setValue(i,n);
+      hpCpu -= n; dealtYou += n; dmgYou.textContent = String(dealtYou); setHpBars(); floatNearBar(barCpu, `-${n}`); if(hpCpu<=0){ endMatch('YOU WIN (HP)'); return; }
+      if(boardYou.solved()){ endMatch('YOU WIN (Complete)'); }
+    } else {
+      hpYou -= n; setHpBars(); floatNearBar(barYou, `-${n}`); floatOnBoard(boardYou, i, `- ${n}`); stunUntil = now() + 1000; if(hpYou<=0){ endMatch('YOU LOSE (HP)'); }
+    }
+  }
+
+  // キー操作
+  window.addEventListener('keydown', (e)=>{
+    if(e.key>='1' && e.key<='9'){ handleNumber(Number(e.key)); }
+    else if(e.key==='Backspace' || e.key==='Delete'){ handleNumber(0); }
+    else if(e.key==='p' || e.key==='P'){ pauseToggle(); }
+    else if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)){
+      const st=boardYou.state; if(st.selected<0){ st.selected=0; return; }
+      let r=row(st.selected), c=col(st.selected);
+      if(e.key==='ArrowUp') r=Math.max(0,r-1);
+      if(e.key==='ArrowDown') r=Math.min(8,r+1);
+      if(e.key==='ArrowLeft') c=Math.max(0,c-1);
+      if(e.key==='ArrowRight') c=Math.min(8,c+1);
+      st.selected=idx(r,c); boardYou.resize();
+    }
+  });
+
+  // CPU
+  function cpuStep(){ if(paused||finished) return; if(now()<cpuStunUntil) return; const grid=boardCpu.state.grid; const empty=[]; for(let i=0;i<81;i++) if(grid[i]===0) empty.push(i); if(empty.length===0){ endMatch('CPU 完成… YOU LOSE'); return; } const i = empty[Math.floor(Math.random()*empty.length)]; const correct = solutionCpu[i]; const miss = Math.random() < cpuMissProb(); if(miss){
+      // miss: choose wrong digit, self-damage, 1s stun
+      let wrong; do { wrong = 1 + Math.floor(Math.random()*9); } while(wrong===correct);
+      floatOnBoard(boardCpu, i, `- ${wrong}`);
+      hpCpu -= wrong; setHpBars(); floatNearBar(barCpu, `-${wrong}`); cpuStunUntil = now() + 1000; if(hpCpu<=0){ endMatch('YOU WIN (HP)'); }
+    } else {
+      boardCpu.setValue(i,correct); progCpu.textContent = `${countFilled(grid)}/81`; hpYou -= correct; dealtCpu += correct; dmgCpu.textContent = String(dealtCpu); setHpBars(); floatNearBar(barYou, `-${correct}`); if(hpYou<=0){ endMatch('YOU LOSE (HP)'); return; } if(boardCpu.solved()){ endMatch('YOU LOSE (Complete)'); }
+    }
+  }
+
+  // Buttons
+  elMatch.addEventListener('click', startMatch);
+  elPause.addEventListener('click', pauseToggle);
+  elNew.addEventListener('click', newMatch);
+  elAuto.addEventListener('change', ()=>{ boardYou.state.autoCheck = elAuto.checked; boardYou.resize(); });
+  elCpuDiff.addEventListener('change', ()=>{ if(running&&!paused){ clearInterval(cpuTimer); cpuTimer=setInterval(cpuStep, cpuMoveInterval()*1000); } setCpuSpeedLabel(cpuMoveInterval()); });
+
+  // ===== Self-tests =====
+  (function selfTests(){
+    // Solver uniqueness sample
+    const sample=[0,0,0,2,6,0,7,0,1, 6,8,0,0,7,0,0,9,0, 1,9,0,0,0,4,5,0,0, 8,2,0,1,0,0,0,4,0, 0,0,4,6,0,2,9,0,0, 0,5,0,0,0,3,0,2,8, 0,0,9,3,0,0,0,7,4, 0,4,0,0,5,0,0,3,6, 7,0,3,0,1,8,0,0,0];
+    const {solved,solutions} = solve(sample,2);
+    console.assert(solved && solutions===1, 'Solver uniqueness test failed');
+
+    // CPU difficulty mapping tests
+    const save = elCpuDiff.value;
+    const cases=[['vEasy',10.0,0.50],['easy',7.5,0.30],['medium',4.5,0.15],['hard',2.0,0.07],['expert',0.35,0.005]];
+    for(const [k,sec,prob] of cases){
+      elCpuDiff.value=k;
+      console.assert(Math.abs(cpuMoveInterval()-sec) < 1e-9, 'Interval map '+k);
+      console.assert(Math.abs(cpuMissProb()-prob) < 1e-9, 'Miss map '+k);
+    }
+    elCpuDiff.value=save;
+
+    // Overlay z-index test
+    const z = parseInt(getComputedStyle(document.querySelector('.overlay')).zIndex,10);
+    console.assert(z>=10000, 'Overlay should be on top');
+  })();
+
+  // Boot
+  newMatch();
+})();
+</script>
+</body>
+</html>
